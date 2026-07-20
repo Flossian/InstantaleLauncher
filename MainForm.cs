@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace InstantaleLauncher
@@ -211,6 +212,7 @@ namespace InstantaleLauncher
             _portraitTile = new PortraitTile(_watcher, TogglePortraitPanel, ShowPortraitPanel);
             _flow.Controls.Add(_portraitTile);
 
+            var installedNames = new List<string>();
             foreach (var tool in tools)
             {
                 // 前回終了時に残した(または手動起動された)サービスを拾い直す
@@ -220,9 +222,15 @@ namespace InstantaleLauncher
                 var tile = new ToolTile(tool, _services, LaunchTool);
                 _tilesByFolder[tool.Folder] = tile;
                 _flow.Controls.Add(tile);
+                installedNames.Add(tool.Name);
             }
 
-            if (tools.Count == 0)
+            // 未導入の既知ツールは「入手」タイルとして表示し、ネットから最新リリースを取得できるようにする
+            var missing = ToolCatalog.Missing(installedNames);
+            foreach (var entry in missing)
+                _flow.Controls.Add(new InstallTile(entry, InstallTool));
+
+            if (tools.Count == 0 && missing.Count == 0)
             {
                 _flow.Controls.Add(new Label
                 {
@@ -300,6 +308,41 @@ namespace InstantaleLauncher
             {
                 MessageBox.Show(this, ex.Message, tool.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        /// <summary>
+        /// 未導入ツールの最新リリースをバックグラウンドで取得・導入する。
+        /// 成功時は再スキャンして起動タイルへ差し替え、失敗時はボタンを戻してエラーを表示する。
+        /// </summary>
+        private void InstallTool(CatalogEntry entry, InstallTile tile)
+        {
+            tile.BeginInstall();
+            Task.Run(delegate
+            {
+                Exception error = null;
+                try { ReleaseInstaller.Install(entry, _toolsDir); }
+                catch (Exception ex) { error = ex; }
+
+                if (IsDisposed || !IsHandleCreated) return;
+                try
+                {
+                    BeginInvoke((Action)delegate
+                    {
+                        if (error == null)
+                        {
+                            Rescan();   // 導入済みになったので一覧を作り直す(入手タイル→起動タイル)
+                        }
+                        else
+                        {
+                            if (!tile.IsDisposed) tile.EndInstall();
+                            MessageBox.Show(this, error.Message, Lang.F("Install.Failed", entry.Folder),
+                                MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    });
+                }
+                catch (ObjectDisposedException) { }
+                catch (InvalidOperationException) { }
+            });
         }
 
         /// <summary>立ち絵詳細パネルを開く(既に開いていれば何もしない)。</summary>
