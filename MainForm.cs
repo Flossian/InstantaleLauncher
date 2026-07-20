@@ -211,6 +211,7 @@ namespace InstantaleLauncher
             _portraitTile = new PortraitTile(_watcher, TogglePortraitPanel, ShowPortraitPanel);
             _flow.Controls.Add(_portraitTile);
 
+            var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var tool in tools)
             {
                 // 前回終了時に残した(または手動起動された)サービスを拾い直す
@@ -220,9 +221,19 @@ namespace InstantaleLauncher
                 var tile = new ToolTile(tool, _services, LaunchTool);
                 _tilesByFolder[tool.Folder] = tile;
                 _flow.Controls.Add(tile);
+                installed.Add(tool.Name);
             }
 
-            if (tools.Count == 0)
+            // 既知ツールのうち未導入のものは、最新リリースを取得するタイルを並べる
+            int installTiles = 0;
+            foreach (var entry in ToolCatalog.Entries)
+            {
+                if (installed.Contains(entry.Folder)) continue;
+                _flow.Controls.Add(new InstallTile(entry, _toolsDir, Rescan));
+                installTiles++;
+            }
+
+            if (tools.Count == 0 && installTiles == 0)
             {
                 _flow.Controls.Add(new Label
                 {

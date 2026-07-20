@@ -72,8 +72,8 @@ namespace InstantaleLauncher
                 }
                 else
                 {
-                    // 2. exe → 3. index.html → 4. 非表示
-                    entry = PickExe(dir, name, selfExeName) ?? FindFileIgnoreCase(dir, "index.html");
+                    // 2. exe → 3. html(index.html 優先、無ければ任意の *.html) → 4. 非表示
+                    entry = PickExe(dir, name, selfExeName) ?? PickHtml(dir);
                     if (entry == null) continue;
                 }
 
@@ -118,6 +118,17 @@ namespace InstantaleLauncher
                     return exe;
             }
             return exes[0];
+        }
+
+        /// <summary>フォルダ内の html を選ぶ。index.html を優先し、無ければ最初の *.html(名前順)。</summary>
+        private static string PickHtml(string dir)
+        {
+            var index = FindFileIgnoreCase(dir, "index.html");
+            if (index != null) return index;
+
+            return Directory.GetFiles(dir, "*.html", SearchOption.TopDirectoryOnly)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
         }
 
         /// <summary>大文字小文字を無視してファイル名一致を探す(Directory.GetFiles は既定で大小無視だが明示的に照合する)。</summary>

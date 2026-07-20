@@ -108,13 +108,19 @@ namespace InstantaleLauncher
         /// <summary>ツール名から専用アイコンを選ぶ。該当がなければ種別既定のアイコン。</summary>
         public static Bitmap LoadToolIcon(ToolInfo tool)
         {
-            var n = tool.Name.ToLowerInvariant();
+            return LoadToolIcon(tool.Name, tool.Kind);
+        }
+
+        /// <summary>フォルダ名と種別から専用アイコンを選ぶ(未導入タイルなど ToolInfo が無い場合に使う)。</summary>
+        public static Bitmap LoadToolIcon(string name, ToolKind kind)
+        {
+            var n = (name ?? string.Empty).ToLowerInvariant();
             Bitmap bmp = null;
             if (n.Contains("save")) bmp = LoadEmbeddedIcon("SaveEditor");
             else if (n.Contains("output")) bmp = LoadEmbeddedIcon("OutputViewer");
             else if (n.Contains("world")) bmp = LoadEmbeddedIcon("WorldViewer");
             else if (n.Contains("proxy") || n.Contains("llm")) bmp = LoadEmbeddedIcon("LLMProxy");
-            return bmp ?? LoadEmbeddedIcon(DefaultIconName(tool.Kind));
+            return bmp ?? LoadEmbeddedIcon(DefaultIconName(kind));
         }
 
         /// <summary>種別ごとの既定アイコンのリソース名を返す。</summary>

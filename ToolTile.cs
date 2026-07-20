@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace InstantaleLauncher
@@ -289,6 +290,96 @@ namespace InstantaleLauncher
                 Theme.StylePrimaryButton(ActionButton);
             SetTooltip(Lang.T(watching ? "Portrait.Watching" : "Portrait.NotWatching")
                 + Environment.NewLine + Lang.T("Portrait.TileDetail"));
+        }
+    }
+
+    /// <summary>
+    /// 既知ツールの未導入タイル。ボタン押下で GitHub の最新リリースを取得して tools\ へ導入し、
+    /// 完了後に再スキャンを促す(このタイルは通常タイルへ置き換わる)。
+    /// </summary>
+    public sealed class InstallTile : TileBase
+    {
+        private readonly CatalogEntry _entry;
+        private readonly string _toolsDir;
+        private readonly Action _onInstalled;
+        private bool _busy;
+
+        /// <summary>未導入バッジ・取得ボタンを持つタイルを構築する。onInstalled は導入成功時の再スキャン用。</summary>
+        public InstallTile(CatalogEntry entry, string toolsDir, Action onInstalled)
+            : base(entry.Title, Theme.LoadToolIcon(entry.Folder, entry.Kind),
+                   entry.Kind.ToString().ToUpperInvariant(), Theme.BadgeColor(entry.Kind))
+        {
+            _entry = entry;
+            _toolsDir = toolsDir;
+            _onInstalled = onInstalled;
+
+            StateDot.Visible = true;
+            StateDot.ForeColor = Theme.Stopped;   // 未導入を示す
+
+            ActionButton.Text = Lang.T("Tile.Install");
+            Theme.StyleAccentButton(ActionButton);
+            ActionButton.Click += delegate { StartInstall(); };
+            SetTooltip(Lang.F("Tile.NotInstalled", _entry.Owner + "/" + _entry.Repo));
+        }
+
+        /// <summary>取得を開始する。以降の重い処理はバックグラウンドスレッドで行う。</summary>
+        private void StartInstall()
+        {
+            if (_busy) return;
+            _busy = true;
+            ActionButton.Enabled = false;
+            ActionButton.Text = Lang.T("Tile.Fetching");
+
+            var thread = new Thread(RunInstall);
+            thread.IsBackground = true;
+            thread.Start();
+        }
+
+        /// <summary>最新リリースの解決 → ダウンロード → 展開。完了/失敗を UI スレッドへ戻す。</summary>
+        private void RunInstall()
+        {
+            try
+            {
+                var asset = ReleaseInstaller.ResolveLatest(_entry.Owner, _entry.Repo);
+                if (asset == null)
+                    throw new InvalidOperationException(Lang.T("Tile.NoAsset"));
+
+                ReleaseInstaller.Install(_toolsDir, _entry.Folder, asset, ReportProgress);
+                OnUi(delegate { _onInstalled(); });   // 再スキャンでこのタイルは破棄・置換される
+            }
+            catch (Exception ex)
+            {
+                OnUi(delegate { FinishError(ex.Message); });
+            }
+        }
+
+        /// <summary>ダウンロード進捗(0..100、-1 は不明)をボタン文言へ反映する。</summary>
+        private void ReportProgress(int percent)
+        {
+            OnUi(delegate
+            {
+                ActionButton.Text = percent < 0
+                    ? Lang.T("Tile.Fetching")
+                    : Lang.F("Tile.FetchingPercent", percent);
+            });
+        }
+
+        /// <summary>失敗時: ボタンを元に戻し、原因をダイアログで示す。</summary>
+        private void FinishError(string message)
+        {
+            _busy = false;
+            ActionButton.Enabled = true;
+            ActionButton.Text = Lang.T("Tile.Install");
+            MessageBox.Show(this, message, _entry.Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        /// <summary>UI スレッドへマーシャリングして実行する(破棄済みなら無視)。</summary>
+        private void OnUi(Action action)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke(action); }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         }
     }
 }
