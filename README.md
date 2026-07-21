@@ -17,13 +17,22 @@
 - Windows
 - .NET Framework 4.8
 
-## セットアップ
+## 使い方
 
 1. `InstantaleLauncher.exe` を実行する
 2. 使用するツールをダウンロードする
-3. 
 
+個別ツールの使い方については、各ツールのREADMEをご確認ください。
 初回起動時にゲームフォルダ・設定などを問い合わせ、`settings.ini`(exe と同階層)に保存します。
+
+## 自作の各種ツール
+|ツール名|簡単な説明|
+|---|---|
+|[セーブエディタ](https://github.com/Flossian/InstantaleSaveEditor)|セーブデータを編集するツール|
+|[LLMプロキシ](https://github.com/Flossian/InstantaleLLMProxy)|LLMとのやりとりを改編するツール|
+|[StableDiffusionプロキシ](https://github.com/Flossian/InstantaleStableDiffusionMod)|StableDiffusionの機能を拡張する|
+|[WorldViewer](https://github.com/Flossian/InstantaleWorldVeiwer)|各ワールドデータの街の繋がりを可視化する|
+|[OutputViewer](https://github.com/Flossian/instantale-output-viewer)|アウトプットログを見やすくする|
 
 ## ビルド方法
 
