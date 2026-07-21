@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace InstantaleLauncher
@@ -90,9 +92,21 @@ namespace InstantaleLauncher
             Theme.StyleAccentButton(rescanButton);
             rescanButton.Click += delegate { Rescan(); };
             toolbar.Controls.Add(rescanButton);
+
+            var updateCheckButton = new Button
+            {
+                Text = Lang.T("Update.Check"),
+                Size = new Size(120, 30),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            };
+            Theme.StyleButton(updateCheckButton);
+            updateCheckButton.Click += delegate { CheckUpdates(); };
+            toolbar.Controls.Add(updateCheckButton);
+
             toolbar.Layout += delegate
             {
                 rescanButton.Location = new Point(toolbar.ClientSize.Width - rescanButton.Width - 16, 9);
+                updateCheckButton.Location = new Point(rescanButton.Left - updateCheckButton.Width - 8, 9);
             };
 
             // ---- ステータスバー ----
@@ -217,12 +231,17 @@ namespace InstantaleLauncher
                 if (tool.Kind == ToolKind.Svc)
                     _services.Attach(tool);
 
-                var tile = new ToolTile(tool, _services, LaunchTool);
+                var tile = new ToolTile(tool, _services, LaunchTool, UpdateCatalogTool);
                 _tilesByFolder[tool.Folder] = tile;
                 _flow.Controls.Add(tile);
             }
 
-            if (tools.Count == 0)
+            // 未導入の既知ツールは「ダウンロード」ボタン付きタイルとして並べる
+            var missing = ToolCatalog.Missing(tools);
+            foreach (var entry in missing)
+                _flow.Controls.Add(new InstallTile(entry, InstallCatalogTool));
+
+            if (tools.Count == 0 && missing.Count == 0)
             {
                 _flow.Controls.Add(new Label
                 {
@@ -300,6 +319,135 @@ namespace InstantaleLauncher
             {
                 MessageBox.Show(this, ex.Message, tool.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        // ---- 導入 / 更新(ネット取得) ----
+
+        /// <summary>未導入タイルの「ダウンロード」押下時。最新リリースを取得・展開して再スキャンする。</summary>
+        private void InstallCatalogTool(ToolCatalogEntry entry, InstallTile tile)
+        {
+            RunInstallPipeline(entry, false, null,
+                tile.SetProgress, tile.SetInstalling,
+                delegate { Rescan(); },
+                tile.SetFailed);
+        }
+
+        /// <summary>導入済みタイルの更新ボタン押下時。SVC 稼働中は停止してから最新へ入れ替える(設定は保持)。</summary>
+        private void UpdateCatalogTool(ToolCatalogEntry entry, ToolTile tile)
+        {
+            var tool = tile.Tool;
+            // 展開前(バックグラウンド側)に SVC を停止してファイルロックを避ける
+            Action preInstall = null;
+            if (tool.Kind == ToolKind.Svc)
+            {
+                preInstall = delegate
+                {
+                    if (!_services.IsRunning(tool.Folder)) return;
+                    _services.Stop(tool.Folder);
+                    // 停止は非同期。最大 ~6 秒待って完了を確認する
+                    for (int i = 0; i < 60 && _services.IsRunning(tool.Folder); i++)
+                        Thread.Sleep(100);
+                };
+            }
+
+            RunInstallPipeline(entry, true, preInstall,
+                tile.SetProgress, tile.SetInstalling,
+                delegate { Rescan(); },
+                tile.SetFailed);
+        }
+
+        /// <summary>
+        /// 取得→ダウンロード→(必要なら停止)→展開→完了/失敗コールバックの共通パイプライン。
+        /// ネットI/Oと展開はバックグラウンドで行い、UI更新は BeginInvoke 経由で行う。
+        /// </summary>
+        private void RunInstallPipeline(ToolCatalogEntry entry, bool isUpdate, Action preInstall,
+            Action<int> setProgress, Action setInstalling, Action onDone, Action onFail)
+        {
+            Task.Run(delegate
+            {
+                string tempFile = null;
+                try
+                {
+                    var asset = ReleaseFetcher.FetchLatest(entry);
+                    tempFile = Path.Combine(Path.GetTempPath(),
+                        "InstantaleLauncher_dl_" + Guid.NewGuid().ToString("N") + entry.AssetExt);
+                    ReleaseFetcher.Download(asset.DownloadUrl, tempFile,
+                        delegate (int pct) { UiInvoke(delegate { setProgress(pct); }); });
+
+                    UiInvoke(setInstalling);
+                    if (preInstall != null) preInstall();
+                    ToolInstaller.Install(entry, tempFile, asset.Tag, _toolsDir, isUpdate);
+
+                    UiInvoke(onDone);
+                }
+                catch (Exception ex)
+                {
+                    UiInvoke(delegate
+                    {
+                        onFail();
+                        MessageBox.Show(this, ex.Message, entry.FolderName,
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    });
+                }
+                finally
+                {
+                    if (tempFile != null)
+                    {
+                        try { File.Delete(tempFile); } catch { }
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// 「更新を確認」押下時。導入済みのカタログツールについて最新tagを取得し、
+        /// .launcher_meta.ini の現在tagと異なるものの更新ボタンを強調する。取得失敗は無視する。
+        /// </summary>
+        private void CheckUpdates()
+        {
+            // クロススレッドで辞書を触らないよう、対象を先にUIスレッドでスナップショットする
+            var targets = new List<KeyValuePair<string, ToolCatalogEntry>>();
+            foreach (var kv in _tilesByFolder)
+            {
+                var entry = ToolCatalog.Find(ToolCatalog.FolderBaseName(kv.Key));
+                if (entry != null)
+                    targets.Add(new KeyValuePair<string, ToolCatalogEntry>(kv.Key, entry));
+            }
+            if (targets.Count == 0) return;
+
+            Task.Run(delegate
+            {
+                foreach (var t in targets)
+                {
+                    var folder = t.Key;
+                    try
+                    {
+                        var asset = ReleaseFetcher.FetchLatest(t.Value);
+                        var installed = ToolInstaller.ReadInstalledTag(folder);
+                        if (string.IsNullOrEmpty(asset.Tag) ||
+                            string.Equals(asset.Tag, installed, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        var latest = asset.Tag;
+                        UiInvoke(delegate
+                        {
+                            ToolTile tile;
+                            if (_tilesByFolder.TryGetValue(folder, out tile) && !tile.IsDisposed)
+                                tile.MarkUpdateAvailable(latest);
+                        });
+                    }
+                    catch { /* 取得失敗は該当タイルを非強調のまま無視 */ }
+                }
+            });
+        }
+
+        /// <summary>UIスレッドで安全にアクションを実行する(破棄後・ハンドル未生成は無視)。</summary>
+        private void UiInvoke(Action action)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke(action); }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         }
 
         /// <summary>立ち絵詳細パネルを開く(既に開いていれば何もしない)。</summary>

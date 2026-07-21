@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>7.3</LangVersion>
+    <RootNamespace>InstantaleLauncher</RootNamespace>
+    <AssemblyName>InstantaleLauncher</AssemblyName>
+    <AssemblyTitle>InstantaleLauncher</AssemblyTitle>
+    <Product>InstantaleLauncher</Product>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="lang\ja.ini" />
+    <EmbeddedResource Include="lang\en.ini" />
+    <EmbeddedResource Include="icons\*.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ビルド時参照アセンブリのみ。出力・実行時依存には含まれない -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

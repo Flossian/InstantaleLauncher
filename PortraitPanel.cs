@@ -43,7 +43,7 @@ namespace InstantaleLauncher
                 Text = Lang.T("Portrait.Title"),
                 AutoSize = true,
                 Location = new Point(x, 12),
-                Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 9.5f, FontStyle.Bold),
+                Font = Theme.UiFont(9.5f, FontStyle.Bold),
                 ForeColor = Theme.Text,
                 BackColor = Color.Transparent,
             };
@@ -56,6 +56,7 @@ namespace InstantaleLauncher
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
             };
             Theme.StyleButton(closeButton);
+            closeButton.Font = Theme.SymbolFont(9f);   // ✕ グリフの被覆をロケールに依らず確保
             closeButton.FlatAppearance.BorderSize = 0;
             closeButton.Click += delegate { Visible = false; };
             Controls.Add(closeButton);
