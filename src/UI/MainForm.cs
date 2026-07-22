@@ -38,6 +38,7 @@ namespace InstantaleLauncher
             Font = SystemFonts.MessageBoxFont;
             BackColor = Theme.Background;
             ForeColor = Theme.Text;
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             ClientSize = new Size(860, 560);
             MinimumSize = new Size(560, 360);
             StartPosition = FormStartPosition.CenterScreen;
