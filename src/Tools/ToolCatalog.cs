@@ -18,13 +18,23 @@ namespace InstantaleLauncher
         public string Repo;
         /// <summary>取得アセットの拡張子(".zip" or ".html")。アセット選択とインストール方式を決める。</summary>
         public string AssetExt;
+        /// <summary>
+        /// アセット名のグロブ(任意)。リリースに同じ拡張子のアセットが複数あるとき、
+        /// 拡張子一致の代わりにこの名前一致で1件を選ぶ。null なら拡張子のみで選ぶ。
+        /// </summary>
+        public string AssetNameGlob;
         /// <summary>タイルのバッジ・既定アイコンに使う表示種別。</summary>
         public ToolKind DisplayKind;
         /// <summary>
-        /// 更新時にユーザー編集を保持するパターン(フォルダ直下の名前グロブ)。
+        /// 更新時にユーザー編集を保持するパターン(名前グロブ。\ 区切りでサブフォルダ内も指定可)。
         /// ディレクトリ名に一致した場合は再帰的にユーザーファイルを優先コピーする。
         /// </summary>
         public string[] PreservePatterns;
+        /// <summary>
+        /// 更新時に「新版に同名が無い場合のみ」旧フォルダから引き継ぐパターン(書式は PreservePatterns と同じ)。
+        /// 同梱物が新版で更新されるフォルダ(例: MOD 一式)にユーザー追加分だけを残すために使う。
+        /// </summary>
+        public string[] PreserveIfMissingPatterns;
 
         /// <summary>"owner/repo" 形式。API URL 組み立て・メタ記録に使う。</summary>
         public string RepoSlug { get { return Owner + "/" + Repo; } }
@@ -73,6 +83,19 @@ namespace InstantaleLauncher
                 Owner = "Flossian", Repo = "InstantaleStableDiffusionMod",
                 AssetExt = ".zip", DisplayKind = ToolKind.Bat,
                 PreservePatterns = new[] { "sd_upscale*.ini" },
+            },
+            new ToolCatalogEntry
+            {
+                FolderName = "InstantaleModLoader",
+                Owner = "Flossian", Repo = "InstantaleModLoader",
+                AssetExt = ".zip", DisplayKind = ToolKind.Bat,
+                // リリースにはローダ単体 zip・MOD 単体 zip もあるため、同梱版(-full)を名前で選ぶ
+                AssetNameGlob = "InstantaleModLoader-*-full.zip",
+                // settings\ は zip に含まれず実行時生成(GUI 設定・MOD 設定・デバッグモード)。
+                // load_order.json はユーザーの並び順・無効リストを優先する
+                PreservePatterns = new[] { "settings", @"runtime\mods\load_order.json" },
+                // 同梱 MOD は新版を採用し、ユーザーが追加した MOD フォルダだけを引き継ぐ
+                PreserveIfMissingPatterns = new[] { @"runtime\mods\*" },
             },
         };
 

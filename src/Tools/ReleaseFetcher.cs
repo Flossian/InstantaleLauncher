@@ -22,7 +22,10 @@ namespace InstantaleLauncher
         // GitHub は User-Agent 無しのリクエストを 403 で弾く
         private const string UserAgent = "InstantaleLauncher";
 
-        /// <summary>指定カタログエントリの最新リリースから、拡張子に合致するアセットを1件選んで返す。</summary>
+        /// <summary>
+        /// 指定カタログエントリの最新リリースから、アセットを1件選んで返す。
+        /// AssetNameGlob があれば名前一致で、無ければ拡張子一致で選ぶ。
+        /// </summary>
         public static ReleaseAsset FetchLatest(ToolCatalogEntry e)
         {
             EnsureTls();
@@ -39,7 +42,7 @@ namespace InstantaleLauncher
             using (var reader = new StreamReader(stream))
                 json = reader.ReadToEnd();
 
-            var asset = SelectAsset(json, e.AssetExt);
+            var asset = SelectAsset(json, e.AssetExt, e.AssetNameGlob);
             if (asset == null)
                 throw new InvalidOperationException("No matching asset for " + e.RepoSlug);
             asset.Tag = ExtractTag(json);
@@ -104,11 +107,13 @@ namespace InstantaleLauncher
         }
 
         /// <summary>
-        /// assets 配列内の name/browser_download_url ペアを走査し、拡張子に一致する先頭アセットを選ぶ。
-        /// 一致が無ければ先頭アセット。アセットが1件も無ければ null。
+        /// assets 配列内の name/browser_download_url ペアを走査し、条件に一致する先頭アセットを選ぶ。
+        /// nameGlob があれば名前グロブで(同拡張子のアセットが複数あるリリース向け)、無ければ拡張子で照合する。
+        /// 一致が無ければ null(誤った種類のアセットを導入して壊すより、取得失敗として扱う)。
+        /// 拡張子・グロブとも指定が無い場合のみ先頭アセットを返す。
         /// release 直下の "name"(リリースタイトル)を拾わないよう assets 配列以降のみを対象にする。
         /// </summary>
-        private static ReleaseAsset SelectAsset(string json, string ext)
+        private static ReleaseAsset SelectAsset(string json, string ext, string nameGlob)
         {
             // "assets_url" ではなく "assets":[ を厳密に探す(閉じ引用符の直後がコロン+角括弧)
             var arr = Regex.Match(json, "\"assets\"\\s*:\\s*\\[");
@@ -116,19 +121,19 @@ namespace InstantaleLauncher
 
             var rx = new Regex(
                 "\"name\"\\s*:\\s*\"([^\"]*)\"[\\s\\S]*?\"browser_download_url\"\\s*:\\s*\"([^\"]*)\"");
+            var globRx = string.IsNullOrEmpty(nameGlob) ? null : ToolInstaller.GlobToRegex(nameGlob);
 
-            ReleaseAsset first = null;
             foreach (Match m in rx.Matches(scope))
             {
                 var name = m.Groups[1].Value;
                 var dl = m.Groups[2].Value;
-                var asset = new ReleaseAsset { AssetName = name, DownloadUrl = dl };
-                if (first == null) first = asset;
-                if (!string.IsNullOrEmpty(ext) &&
-                    name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                    return asset;
+                bool match = globRx != null
+                    ? globRx.IsMatch(name)
+                    : (string.IsNullOrEmpty(ext) || name.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
+                if (match)
+                    return new ReleaseAsset { AssetName = name, DownloadUrl = dl };
             }
-            return first;
+            return null;
         }
     }
 }

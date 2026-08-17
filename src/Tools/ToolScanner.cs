@@ -32,6 +32,8 @@ namespace InstantaleLauncher
             {
                 // v2 で mod_gui.bat に統合。旧版フォルダ向けに sd_upscale_gui.bat も許容
                 { "InstantaleStableDiffusionMod", new[] { "mod_gui.bat", "sd_upscale_gui.bat" } },
+                // Python ベースで exe を持たない。GUI 起動用の bat をエントリにする
+                { "InstantaleModLoader", new[] { "InstantaleModLoader.bat" } },
             };
 
         // 既知サービス名リスト。フォルダ名が一致すれば SVC として管理する。

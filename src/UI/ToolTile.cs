@@ -436,21 +436,38 @@ namespace InstantaleLauncher
             }
         }
 
+        // 以下の表示更新は導入パイプラインから UiInvoke 経由で届くため、
+        // 途中の Rescan でタイルが破棄済みのことがある。必ず IsDisposed を確認してから触る。
+
         /// <summary>「更新を確認」で最新tagが現在と異なると判明したとき、更新ボタンをアクセント色で強調する。</summary>
         public void MarkUpdateAvailable(string latestTag)
         {
-            if (UpdateButton == null) return;
+            if (IsDisposed || UpdateButton == null) return;
             UpdateButton.FlatAppearance.BorderColor = Theme.Accent;
             UpdateButton.ForeColor = Theme.Accent;
             SetUpdateTooltip(Lang.F("Update.Available", latestTag));
         }
 
+        /// <summary>
+        /// 更新開始直後(応答が来る前)からボタンを無効化する。Content-Length 不明で進捗が
+        /// 一度も来ない場合や、進行中に Rescan で作り直されたタイルの引き継ぎ表示にも使う。
+        /// </summary>
+        public void SetBusy()
+        {
+            if (IsDisposed) return;
+            ActionButton.Enabled = false;   // 更新中は起動/停止を止める
+            if (UpdateButton == null) return;
+            UpdateButton.Enabled = false;
+            UpdateButton.Text = "…";
+            SetUpdateTooltip(Lang.T("Install.Busy"));
+        }
+
         /// <summary>更新のダウンロード進捗を更新ボタン上に表示する(狭いため数値のみ、詳細はツールチップ)。</summary>
         public void SetProgress(int pct)
         {
-            if (UpdateButton == null) return;
+            if (IsDisposed || UpdateButton == null) return;
             UpdateButton.Enabled = false;
-            ActionButton.Enabled = false;   // 更新中は起動/停止を止める
+            ActionButton.Enabled = false;
             UpdateButton.Text = pct.ToString();
             SetUpdateTooltip(Lang.F("Install.Downloading", pct));
         }
@@ -458,7 +475,7 @@ namespace InstantaleLauncher
         /// <summary>更新の展開中表示。</summary>
         public void SetInstalling()
         {
-            if (UpdateButton == null) return;
+            if (IsDisposed || UpdateButton == null) return;
             UpdateButton.Text = "…";
             SetUpdateTooltip(Lang.T("Install.Installing"));
         }
@@ -466,7 +483,7 @@ namespace InstantaleLauncher
         /// <summary>更新失敗時にボタンを元に戻す(Rescan されない失敗経路のため)。</summary>
         public void SetFailed()
         {
-            if (UpdateButton == null) return;
+            if (IsDisposed || UpdateButton == null) return;
             UpdateButton.Enabled = true;
             ActionButton.Enabled = true;
             UpdateButton.Text = UpdateGlyph;
@@ -502,9 +519,24 @@ namespace InstantaleLauncher
             SetTooltip(Lang.T("Install.NotInstalled"));
         }
 
+        // 以下の表示更新は導入パイプラインから UiInvoke 経由で届くため、
+        // 途中の Rescan でタイルが破棄済みのことがある。必ず IsDisposed を確認してから触る。
+
+        /// <summary>
+        /// ダウンロード開始直後(応答が来る前)からボタンを無効化する。Content-Length 不明で進捗が
+        /// 一度も来ない場合や、進行中に Rescan で作り直されたタイルの引き継ぎ表示にも使う。
+        /// </summary>
+        public void SetBusy()
+        {
+            if (IsDisposed) return;
+            ActionButton.Enabled = false;
+            ActionButton.Text = Lang.T("Install.Busy");
+        }
+
         /// <summary>ダウンロード進捗(0-100%)を主ボタンに表示する。</summary>
         public void SetProgress(int pct)
         {
+            if (IsDisposed) return;
             ActionButton.Enabled = false;
             ActionButton.Text = Lang.F("Install.Downloading", pct);
         }
@@ -512,6 +544,7 @@ namespace InstantaleLauncher
         /// <summary>展開中の表示。</summary>
         public void SetInstalling()
         {
+            if (IsDisposed) return;
             ActionButton.Enabled = false;
             ActionButton.Text = Lang.T("Install.Installing");
         }
@@ -519,6 +552,7 @@ namespace InstantaleLauncher
         /// <summary>失敗時に「ダウンロード」ボタンへ戻す。</summary>
         public void SetFailed()
         {
+            if (IsDisposed) return;
             ActionButton.Enabled = true;
             Theme.StyleAccentButton(ActionButton);
             ActionButton.Text = Lang.T("Install.Download");

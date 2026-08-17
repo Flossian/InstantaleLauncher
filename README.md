@@ -28,6 +28,7 @@
 ## 自作の各種ツール
 |ツール名|簡単な説明|
 |---|---|
+|[ModLoader](https://github.com/Flossian/InstantaleModLoader)|ゲーム本体を書き換えずにMODを適用するローダ|
 |[セーブエディタ](https://github.com/Flossian/InstantaleSaveEditor)|セーブデータを編集するツール|
 |[LLMプロキシ](https://github.com/Flossian/InstantaleLLMProxy)|LLMとのやりとりを改編するツール|
 |[StableDiffusionプロキシ](https://github.com/Flossian/InstantaleStableDiffusionMod)|StableDiffusionの機能を拡張する|

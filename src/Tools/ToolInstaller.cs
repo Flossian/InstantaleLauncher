@@ -42,8 +42,11 @@ namespace InstantaleLauncher
                     File.Copy(downloadedFile, Path.Combine(staging, "index.html"), true);
                 }
 
-                if (isUpdate && Directory.Exists(dest) && e.PreservePatterns != null && e.PreservePatterns.Length > 0)
-                    PreserveUserFiles(dest, staging, e.PreservePatterns);
+                if (isUpdate && Directory.Exists(dest))
+                {
+                    PreserveUserFiles(dest, staging, e.PreservePatterns, false);
+                    PreserveUserFiles(dest, staging, e.PreserveIfMissingPatterns, true);
+                }
 
                 WriteMeta(staging, tag, e.RepoSlug);
                 ReplaceDir(dest, staging);
@@ -81,7 +84,10 @@ namespace InstantaleLauncher
             var dirs = Directory.GetDirectories(staging);
             if (files.Length != 0 || dirs.Length != 1) return;
 
-            var inner = dirs[0];
+            // トップフォルダ内に同名の子フォルダがあると staging 直下への Move が衝突するため、
+            // 先にトップフォルダ自体を一時名へ改名してから中身を引き上げる
+            var inner = Path.Combine(staging, ".flatten_" + Guid.NewGuid().ToString("N"));
+            Directory.Move(dirs[0], inner);
             foreach (var f in Directory.GetFiles(inner))
                 File.Move(f, Path.Combine(staging, Path.GetFileName(f)));
             foreach (var d in Directory.GetDirectories(inner))
@@ -90,22 +96,53 @@ namespace InstantaleLauncher
         }
 
         /// <summary>
-        /// dest 直下でパターンに一致するファイル/フォルダを staging の同名パスへ上書きコピーする
-        /// (ユーザー編集を優先。新版が追加した既定ファイルは staging 側に残るため和集合になる)。
+        /// dest でパターンに一致するファイル/フォルダを staging の同名パスへコピーする。
+        /// パターンは名前グロブで、\ (または /) 区切りでサブフォルダ内も指定できる(中間セグメントもグロブ可)。
+        /// onlyIfMissing=false: 上書きコピー(ユーザー編集を優先。新版が追加した既定ファイルは staging 側に残るため和集合になる)。
+        /// onlyIfMissing=true: staging に同名が無い場合のみコピー(同梱物は新版を採用し、ユーザー追加分だけを引き継ぐ)。
         /// </summary>
-        private static void PreserveUserFiles(string dest, string staging, string[] patterns)
+        private static void PreserveUserFiles(string dest, string staging, string[] patterns, bool onlyIfMissing)
         {
+            if (patterns == null) return;
+            foreach (var p in patterns)
+            {
+                var segments = p.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+                if (segments.Length > 0)
+                    PreserveWalk(dest, staging, segments, 0, onlyIfMissing);
+            }
+        }
+
+        /// <summary>パターンのセグメントを1階層ずつ照合しながら降り、最終セグメントに一致した実体をコピーする。</summary>
+        private static void PreserveWalk(string dest, string staging, string[] segments, int index, bool onlyIfMissing)
+        {
+            if (!Directory.Exists(dest)) return;
+            var rx = GlobToRegex(segments[index]);
+            bool last = index == segments.Length - 1;
+
             foreach (var entry in Directory.GetFileSystemEntries(dest))
             {
                 var name = Path.GetFileName(entry);
                 if (string.Equals(name, MetaFile, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!MatchesAny(name, patterns)) continue;
+                if (!rx.IsMatch(name)) continue;
 
                 var target = Path.Combine(staging, name);
+                if (!last)
+                {
+                    if (Directory.Exists(entry))
+                        PreserveWalk(entry, target, segments, index + 1, onlyIfMissing);
+                    continue;
+                }
+
+                if (onlyIfMissing && (File.Exists(target) || Directory.Exists(target))) continue;
                 if (Directory.Exists(entry))
+                {
                     CopyDirOver(entry, target);
+                }
                 else
+                {
+                    Directory.CreateDirectory(staging);   // サブフォルダ指定時は staging 側が未作成のことがある
                     File.Copy(entry, target, true);
+                }
             }
         }
 
@@ -119,19 +156,8 @@ namespace InstantaleLauncher
                 CopyDirOver(d, Path.Combine(dst, Path.GetFileName(d)));
         }
 
-        /// <summary>名前がいずれかのグロブパターンに一致するか(大文字小文字無視)。</summary>
-        private static bool MatchesAny(string name, string[] patterns)
-        {
-            foreach (var p in patterns)
-            {
-                if (GlobToRegex(p).IsMatch(name))
-                    return true;
-            }
-            return false;
-        }
-
-        /// <summary>ファイル名グロブ(* ?)を正規表現に変換する。</summary>
-        private static Regex GlobToRegex(string glob)
+        /// <summary>ファイル名グロブ(* ?)を正規表現に変換する(ReleaseFetcher のアセット名照合と共用)。</summary>
+        internal static Regex GlobToRegex(string glob)
         {
             var pattern = "^" + Regex.Escape(glob).Replace("\\*", ".*").Replace("\\?", ".") + "$";
             return new Regex(pattern, RegexOptions.IgnoreCase);

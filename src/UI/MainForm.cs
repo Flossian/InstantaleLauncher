@@ -21,10 +21,16 @@ namespace InstantaleLauncher
 
         private readonly FlowLayoutPanel _flow;
         private readonly Label _countLabel;
+        private readonly Button _updateCheckButton;
         private readonly ToolStripStatusLabel _pathLabel;
+        private readonly ToolStripStatusLabel _updateLabel;
         private readonly ToolStripStatusLabel _scanLabel;
         private readonly Dictionary<string, ToolTile> _tilesByFolder =
             new Dictionary<string, ToolTile>(StringComparer.OrdinalIgnoreCase);
+        // 導入/更新が進行中のカタログフォルダ名。二重開始の防止と、途中の Rescan で
+        // タイルが作り直された際の busy 表示引き継ぎに使う(UIスレッドからのみ触る)。
+        private readonly HashSet<string> _installing =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private PortraitTile _portraitTile;
         private readonly PortraitPanel _portraitPanel;
@@ -94,20 +100,20 @@ namespace InstantaleLauncher
             rescanButton.Click += delegate { Rescan(); };
             toolbar.Controls.Add(rescanButton);
 
-            var updateCheckButton = new Button
+            _updateCheckButton = new Button
             {
                 Text = Lang.T("Update.Check"),
                 Size = new Size(120, 30),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
             };
-            Theme.StyleButton(updateCheckButton);
-            updateCheckButton.Click += delegate { CheckUpdates(); };
-            toolbar.Controls.Add(updateCheckButton);
+            Theme.StyleButton(_updateCheckButton);
+            _updateCheckButton.Click += delegate { CheckUpdates(); };
+            toolbar.Controls.Add(_updateCheckButton);
 
             toolbar.Layout += delegate
             {
                 rescanButton.Location = new Point(toolbar.ClientSize.Width - rescanButton.Width - 16, 9);
-                updateCheckButton.Location = new Point(rescanButton.Left - updateCheckButton.Width - 8, 9);
+                _updateCheckButton.Location = new Point(rescanButton.Left - _updateCheckButton.Width - 8, 9);
             };
 
             // ---- ステータスバー ----
@@ -122,11 +128,16 @@ namespace InstantaleLauncher
                 TextAlign = ContentAlignment.MiddleLeft,
                 ForeColor = Theme.TextDim,
             };
+            _updateLabel = new ToolStripStatusLabel
+            {
+                ForeColor = Theme.TextDim,
+            };
             _scanLabel = new ToolStripStatusLabel
             {
                 ForeColor = Theme.TextDim,
             };
             status.Items.Add(_pathLabel);
+            status.Items.Add(_updateLabel);
             status.Items.Add(_scanLabel);
 
             // ---- タイルグリッド ----
@@ -233,6 +244,8 @@ namespace InstantaleLauncher
                     _services.Attach(tool);
 
                 var tile = new ToolTile(tool, _services, LaunchTool, UpdateCatalogTool);
+                if (_installing.Contains(ToolCatalog.FolderBaseName(tool.Folder)))
+                    tile.SetBusy();   // 進行中の更新があればボタン無効を引き継ぐ
                 _tilesByFolder[tool.Folder] = tile;
                 _flow.Controls.Add(tile);
             }
@@ -240,7 +253,12 @@ namespace InstantaleLauncher
             // 未導入の既知ツールは「ダウンロード」ボタン付きタイルとして並べる
             var missing = ToolCatalog.Missing(tools);
             foreach (var entry in missing)
-                _flow.Controls.Add(new InstallTile(entry, InstallCatalogTool));
+            {
+                var installTile = new InstallTile(entry, InstallCatalogTool);
+                if (_installing.Contains(entry.FolderName))
+                    installTile.SetBusy();   // 進行中の導入があればボタン無効を引き継ぐ
+                _flow.Controls.Add(installTile);
+            }
 
             if (tools.Count == 0 && missing.Count == 0)
             {
@@ -327,15 +345,22 @@ namespace InstantaleLauncher
         /// <summary>未導入タイルの「ダウンロード」押下時。最新リリースを取得・展開して再スキャンする。</summary>
         private void InstallCatalogTool(ToolCatalogEntry entry, InstallTile tile)
         {
+            if (!_installing.Add(entry.FolderName)) return;   // 進行中の二重開始を防ぐ
+            tile.SetBusy();   // 応答が来る前からボタンを無効化する(多重クリック防止)
+
             RunInstallPipeline(entry, false, null,
                 tile.SetProgress, tile.SetInstalling,
                 delegate { Rescan(); },
-                tile.SetFailed);
+                // 進行中の Rescan でタイルが作り直されていたら、busy 表示のままの新タイルを戻すため再スキャン
+                delegate { if (tile.IsDisposed) Rescan(); else tile.SetFailed(); });
         }
 
         /// <summary>導入済みタイルの更新ボタン押下時。SVC 稼働中は停止してから最新へ入れ替える(設定は保持)。</summary>
         private void UpdateCatalogTool(ToolCatalogEntry entry, ToolTile tile)
         {
+            if (!_installing.Add(entry.FolderName)) return;   // 進行中の二重開始を防ぐ
+            tile.SetBusy();   // 応答が来る前からボタンを無効化する(多重クリック防止)
+
             var tool = tile.Tool;
             // 展開前(バックグラウンド側)に SVC を停止してファイルロックを避ける
             Action preInstall = null;
@@ -354,7 +379,8 @@ namespace InstantaleLauncher
             RunInstallPipeline(entry, true, preInstall,
                 tile.SetProgress, tile.SetInstalling,
                 delegate { Rescan(); },
-                tile.SetFailed);
+                // 進行中の Rescan でタイルが作り直されていたら、busy 表示のままの新タイルを戻すため再スキャン
+                delegate { if (tile.IsDisposed) Rescan(); else tile.SetFailed(); });
         }
 
         /// <summary>
@@ -379,12 +405,17 @@ namespace InstantaleLauncher
                     if (preInstall != null) preInstall();
                     ToolInstaller.Install(entry, tempFile, asset.Tag, _toolsDir, isUpdate);
 
-                    UiInvoke(onDone);
+                    UiInvoke(delegate
+                    {
+                        _installing.Remove(entry.FolderName);
+                        onDone();
+                    });
                 }
                 catch (Exception ex)
                 {
                     UiInvoke(delegate
                     {
+                        _installing.Remove(entry.FolderName);
                         onFail();
                         MessageBox.Show(this, ex.Message, entry.FolderName,
                             MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -403,6 +434,7 @@ namespace InstantaleLauncher
         /// <summary>
         /// 「更新を確認」押下時。導入済みのカタログツールについて最新tagを取得し、
         /// .launcher_meta.ini の現在tagと異なるものの更新ボタンを強調する。取得失敗は無視する。
+        /// 実行中はボタンを無効化し、結果(更新件数/最新)をステータスバーに表示する。
         /// </summary>
         private void CheckUpdates()
         {
@@ -414,10 +446,18 @@ namespace InstantaleLauncher
                 if (entry != null)
                     targets.Add(new KeyValuePair<string, ToolCatalogEntry>(kv.Key, entry));
             }
-            if (targets.Count == 0) return;
+            if (targets.Count == 0)
+            {
+                _updateLabel.Text = Lang.T("Update.UpToDate");
+                return;
+            }
+
+            _updateCheckButton.Enabled = false;
+            _updateLabel.Text = Lang.T("Update.Checking");
 
             Task.Run(delegate
             {
+                int found = 0;
                 foreach (var t in targets)
                 {
                     var folder = t.Key;
@@ -429,6 +469,7 @@ namespace InstantaleLauncher
                             string.Equals(asset.Tag, installed, StringComparison.OrdinalIgnoreCase))
                             continue;
 
+                        found++;
                         var latest = asset.Tag;
                         UiInvoke(delegate
                         {
@@ -439,6 +480,14 @@ namespace InstantaleLauncher
                     }
                     catch { /* 取得失敗は該当タイルを非強調のまま無視 */ }
                 }
+
+                UiInvoke(delegate
+                {
+                    _updateCheckButton.Enabled = true;
+                    _updateLabel.Text = found > 0
+                        ? Lang.F("Update.FoundCount", found)
+                        : Lang.T("Update.UpToDate");
+                });
             });
         }
 
