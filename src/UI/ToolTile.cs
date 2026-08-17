@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -34,6 +35,8 @@ namespace InstantaleLauncher
         protected readonly Button ActionButton;
         /// <summary>右上の副ボタン(更新)。EnableUpdateButton を呼ぶまで null。</summary>
         protected Button UpdateButton;
+        /// <summary>右上の副ボタン(フォルダを開く)。EnableFolderButton を呼ぶまで null。</summary>
+        protected Button FolderButton;
         private readonly ToolTip _tip = new ToolTip();
 
         // ホバー強調。本体クリックで動作するタイルのみ EnableHoverHighlight で有効化する。
@@ -105,7 +108,8 @@ namespace InstantaleLauncher
             _tip.SetToolTip(this, text);
             foreach (Control c in Controls)
             {
-                if (!ReferenceEquals(c, ActionButton) && !ReferenceEquals(c, UpdateButton))
+                if (!ReferenceEquals(c, ActionButton) && !ReferenceEquals(c, UpdateButton)
+                    && !ReferenceEquals(c, FolderButton))
                     _tip.SetToolTip(c, text);
             }
         }
@@ -159,6 +163,57 @@ namespace InstantaleLauncher
                 float ty = cy + r * (float)Math.Sin(endRad);
                 g.DrawLine(pen, tx - 3.2f, ty - 0.5f, tx + 0.4f, ty + 2.6f);
                 g.DrawLine(pen, tx + 2.6f, ty - 2.2f, tx + 0.4f, ty + 2.6f);
+            }
+        }
+
+        /// <summary>
+        /// 右上に「フォルダを開く」用の副ボタンを追加する。更新ボタン・状態ドットが既にある場合は
+        /// その左へ並べるため、両者を構築し終えた後に呼ぶこと。グリフはフォント依存を避けて手描きする。
+        /// </summary>
+        protected void EnableFolderButton(EventHandler onClick, string tooltip)
+        {
+            const int w = 26, h = 20;
+            int right = UpdateButton != null
+                ? UpdateButton.Left - 4
+                : (StateDot.Visible ? TileWidth - 32 - 4 : TileWidth - 12);
+            FolderButton = new Button
+            {
+                Text = "",
+                Bounds = new Rectangle(right - w, 13, w, h),
+                TabStop = false,
+            };
+            Theme.StyleGhostButton(FolderButton);
+            FolderButton.Click += onClick;
+            FolderButton.Paint += OnFolderButtonPaint;
+            Controls.Add(FolderButton);
+            FolderButton.BringToFront();
+            _tip.SetToolTip(FolderButton, tooltip);
+        }
+
+        /// <summary>フォルダ形(タブ付き矩形)を手描きする。</summary>
+        private static void OnFolderButtonPaint(object sender, PaintEventArgs e)
+        {
+            var b = (Button)sender;
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            const float w = 13f, h = 10f, tab = 5f;
+            float x = (b.Width - w) / 2f;
+            float y = (b.Height - h) / 2f;
+            using (var pen = new Pen(b.ForeColor, 1.2f) { LineJoin = LineJoin.Round })
+            using (var path = new GraphicsPath())
+            {
+                path.AddLines(new[]
+                {
+                    new PointF(x, y + h),
+                    new PointF(x, y),
+                    new PointF(x + tab, y),
+                    new PointF(x + tab + 2f, y + 2.5f),
+                    new PointF(x + w, y + 2.5f),
+                    new PointF(x + w, y + h),
+                });
+                path.CloseFigure();
+                g.DrawPath(pen, path);
             }
         }
 
@@ -306,6 +361,26 @@ namespace InstantaleLauncher
                 SetUpdateTooltip(tag != null
                     ? Lang.F("Update.CurrentVersion", tag) + Environment.NewLine + Lang.T("Update.Button")
                     : Lang.T("Update.Button"));
+            }
+
+            // 更新ボタン・状態ドットの左に「フォルダを開く」を並べる(位置決めのため両者の後に呼ぶ)
+            EnableFolderButton(delegate { OpenFolder(); }, Lang.T("Tile.OpenFolder"));
+        }
+
+        /// <summary>ツールのフォルダをエクスプローラーで開く。</summary>
+        private void OpenFolder()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = _tool.Folder,
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, _tool.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
